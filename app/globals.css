@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+:root {
+  --background: #021c27;
+  --foreground: #F3F4F6;
+  --primary: #00D9FF; /* Electric Blue */
+  --primary-rgb: 0, 217, 255;
+  --accent: #38BDF8; /* Soft Cyan */
+  --accent-rgb: 56, 189, 248;
+  --surface: #032b3c; /* Dark Cyan Surface */
+  --surface-hover: #053b52; /* Dark Cyan Hover Surface */
+  --card-bg: rgba(3, 43, 60, 0.45);
+  --card-border: rgba(0, 217, 255, 0.12);
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbars in Cyan */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(2, 6, 23, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 217, 255, 0.3);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 217, 255, 0.6);
+}
+
+/* Redesigned Glassmorphism Panel styles */
+.glass-panel {
+  background: rgba(7, 16, 38, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 217, 255, 0.12);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 12px rgba(0, 217, 255, 0.05);
+}
+
+.glass-card {
+  background: rgba(7, 16, 38, 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 217, 255, 0.08);
+  border-radius: 1rem;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: inset 0 0 12px rgba(0, 217, 255, 0.02);
+}
+
+.glass-card:hover {
+  background: rgba(7, 16, 38, 0.45);
+  border-color: rgba(0, 217, 255, 0.25);
+  box-shadow: 0 0 25px rgba(0, 217, 255, 0.12), inset 0 0 12px rgba(0, 217, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+/* Avatar glowing outlines matching picture design */
+.avatar-glow-oval {
+  border: 4px solid var(--primary);
+  box-shadow: 0 0 25px rgba(0, 217, 255, 0.6), inset 0 0 15px rgba(0, 217, 255, 0.4);
+  border-radius: 45% 45% 40% 40% / 55% 55% 45% 45%;
+  animation: floatOval 6s ease-in-out infinite;
+}
+
+.avatar-glow-circle {
+  border: 5px solid var(--primary);
+  box-shadow: 0 0 35px rgba(0, 217, 255, 0.7), inset 0 0 20px rgba(0, 217, 255, 0.4);
+  border-radius: 50%;
+  animation: pulseCircle 4s ease-in-out infinite;
+}
+
+@keyframes floatOval {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+    border-radius: 45% 45% 40% 40% / 55% 55% 45% 45%;
+  }
+  50% {
+    transform: translateY(-5px) rotate(1deg);
+    border-radius: 48% 42% 43% 37% / 52% 58% 42% 48%;
+  }
+}
+
+@keyframes pulseCircle {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(0, 217, 255, 0.5), inset 0 0 15px rgba(0, 217, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(0, 217, 255, 0.8), inset 0 0 25px rgba(0, 217, 255, 0.5);
+  }
+}
+
+/* Custom Text glowing styles */
+.glow-text-orange {
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.4), 0 0 20px rgba(0, 217, 255, 0.2);
+}
+
+.glow-text-cyan {
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.4), 0 0 20px rgba(0, 217, 255, 0.2);
+}
+
+/* Gradient Text Shimmer for role title */
+.role-gradient-text {
+  background: linear-gradient(
+    to right,
+    #00D9FF,
+    #38BDF8,
+    #6D5EF9,
+    #00D9FF
+  );
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 6s linear infinite;
+  text-shadow: 0 0 20px rgba(0, 217, 255, 0.25);
+}
+
+@keyframes shimmer {
+  to {
+    background-position: 300% center;
+  }
+}
+
+/* Marquee Skills scrollbar animation */
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 30s linear infinite;
+}
+
+/* Background grid pulse */
+@keyframes gridPulse {
+  0%, 100% { opacity: 0.08; }
+  50% { opacity: 0.18; }
+}
+
+.grid-bg {
+  background-size: 50px 50px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 217, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 217, 255, 0.015) 1px, transparent 1px);
+}
+
+.glow-pulse {
+  animation: gridPulse 10s ease-in-out infinite;
+}
+
+/* Scanline glitch simulation overlay */
+.scanlines {
+  position: relative;
+}
+
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.15) 50%
+  );
+  z-index: 20;
+  background-size: 100% 4px;
+  pointer-events: none;
+  opacity: 0.25;
+}
