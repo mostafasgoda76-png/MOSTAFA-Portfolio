@@ -148,34 +148,37 @@ export default function AdminDashboard() {
     setIsUploading(true);
     synth.playSuccess();
     
-    let finalImageUrl = projImage;
+    try {
+      let finalImageUrl = projImage;
 
-    // Upload project image to Firebase Storage if selected
-    if (projImageFile && isFirebaseConfigured && storage) {
-      try {
-        const storageRef = ref(storage, `project-images/${Date.now()}-${projImageFile.name}`);
-        const snapshot = await uploadBytes(storageRef, projImageFile);
-        finalImageUrl = await getDownloadURL(snapshot.ref);
-      } catch (e) {
-        console.error("Project image upload failed:", e);
+      // Upload project image to Firebase Storage if selected
+      if (projImageFile && isFirebaseConfigured && storage) {
+        try {
+          const storageRef = ref(storage, `project-images/${Date.now()}-${projImageFile.name}`);
+          const snapshot = await uploadBytes(storageRef, projImageFile);
+          finalImageUrl = await getDownloadURL(snapshot.ref);
+        } catch (uploadErr: any) {
+          console.error("Project image upload failed:", uploadErr);
+          alert("فشل رفع الصورة إلى التخزين (Firebase Storage). يرجى التأكد من تفعيل خدمة Storage وقواعد الأمان الخاصة بها.\nالخطأ: " + (uploadErr.message || uploadErr));
+          setIsUploading(false);
+          return;
+        }
       }
-    }
 
-    const tagsArr = projTags.split(",").map(t => t.trim()).filter(Boolean);
-    const kpisArr = projKpis.split("\n").map(k => k.trim()).filter(Boolean);
+      const tagsArr = projTags.split(",").map(t => t.trim()).filter(Boolean);
+      const kpisArr = projKpis.split("\n").map(k => k.trim()).filter(Boolean);
 
-    const projectData: Omit<Project, "id"> & { id?: string } = {
-      title: projTitle,
-      subtitle: projSubtitle,
-      description: projDesc,
-      tags: tagsArr,
-      image: finalImageUrl || "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=800&q=80",
-      liveLink: projLink || "#",
-      kpis: kpisArr
-    };
+      const projectData: Omit<Project, "id"> & { id?: string } = {
+        title: projTitle,
+        subtitle: projSubtitle,
+        description: projDesc,
+        tags: tagsArr,
+        image: finalImageUrl || "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=800&q=80",
+        liveLink: projLink || "#",
+        kpis: kpisArr
+      };
 
-    if (isFirebaseConfigured && db) {
-      try {
+      if (isFirebaseConfigured && db) {
         if (editingProject && editingProject.id) {
           // Edit mode
           const docId = editingProject.id;
@@ -184,13 +187,17 @@ export default function AdminDashboard() {
           // Add mode
           await addDoc(collection(db, "projects"), projectData);
         }
-      } catch (e) {
-        console.error("Firebase project save error:", e);
+      } else {
+        alert("تنبيه: Firebase غير مهيأ بشكل صحيح. يرجى مراجعة متغيرات البيئة.");
       }
-    }
 
-    resetProjectForm();
-    setIsUploading(false);
+      resetProjectForm();
+    } catch (saveErr: any) {
+      console.error("Firebase project save error:", saveErr);
+      alert("حدث خطأ أثناء حفظ المشروع في قاعدة البيانات.\nالخطأ: " + (saveErr.message || saveErr));
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleDeleteProject = async (id: string) => {
@@ -199,8 +206,9 @@ export default function AdminDashboard() {
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "projects", id));
-        } catch (e) {
+        } catch (e: any) {
           console.error("Firebase delete project error:", e);
+          alert("فشل حذف المشروع:\n" + (e.message || e));
         }
       }
     }
@@ -233,40 +241,47 @@ export default function AdminDashboard() {
     setIsUploading(true);
     synth.playSuccess();
 
-    let finalFileUrl = fileUrl;
+    try {
+      let finalFileUrl = fileUrl;
 
-    // Upload presentation to Firebase Storage if selected
-    if (actualFile && isFirebaseConfigured && storage) {
-      try {
-        const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
-        const snapshot = await uploadBytes(storageRef, actualFile);
-        finalFileUrl = await getDownloadURL(snapshot.ref);
-      } catch (e) {
-        console.error("Document upload failed:", e);
+      // Upload presentation to Firebase Storage if selected
+      if (actualFile && isFirebaseConfigured && storage) {
+        try {
+          const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
+          const snapshot = await uploadBytes(storageRef, actualFile);
+          finalFileUrl = await getDownloadURL(snapshot.ref);
+        } catch (uploadErr: any) {
+          console.error("Document upload failed:", uploadErr);
+          alert("فشل رفع الملف إلى التخزين (Firebase Storage).\nالخطأ: " + (uploadErr.message || uploadErr));
+          setIsUploading(false);
+          return;
+        }
       }
-    }
 
-    const fileData: Omit<FileItem, "id"> = {
-      name: fileName.endsWith(`.${fileType}`) ? fileName : `${fileName}.${fileType}`,
-      type: fileType,
-      url: finalFileUrl || "#",
-      size: fileSize || "Unknown Size"
-    };
+      const fileData: Omit<FileItem, "id"> = {
+        name: fileName.endsWith(`.${fileType}`) ? fileName : `${fileName}.${fileType}`,
+        type: fileType,
+        url: finalFileUrl || "#",
+        size: fileSize || "Unknown Size"
+      };
 
-    if (isFirebaseConfigured && db) {
-      try {
+      if (isFirebaseConfigured && db) {
         await addDoc(collection(db, "files"), fileData);
-      } catch (e) {
-        console.error("Firebase upload file error:", e);
+      } else {
+        alert("تنبيه: Firebase غير مهيأ بشكل صحيح.");
       }
-    }
 
-    setFileName("");
-    setFileUrl("");
-    setFileSize("");
-    setActualFile(null);
-    setActualFileName(null);
-    setIsUploading(false);
+      setFileName("");
+      setFileUrl("");
+      setFileSize("");
+      setActualFile(null);
+      setActualFileName(null);
+    } catch (saveErr: any) {
+      console.error("Firebase upload file error:", saveErr);
+      alert("حدث خطأ أثناء حفظ الملف:\n" + (saveErr.message || saveErr));
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleDeleteFile = async (id: string) => {
