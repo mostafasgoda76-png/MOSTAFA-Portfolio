@@ -2,8 +2,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
+import { db, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, Project, FileItem } from "@/data/projects";
 import { 
   Lock, Unlock, Key, ArrowLeft, Plus, Trash2, Edit2, Globe, 
@@ -151,15 +150,28 @@ export default function AdminDashboard() {
     try {
       let finalImageUrl = projImage;
 
-      // Upload project image to Firebase Storage if selected
-      if (projImageFile && isFirebaseConfigured && storage) {
+      // Upload project image using server-side API route to bypass GCS CORS policy
+      if (projImageFile) {
         try {
-          const storageRef = ref(storage, `project-images/${Date.now()}-${projImageFile.name}`);
-          const snapshot = await uploadBytes(storageRef, projImageFile);
-          finalImageUrl = await getDownloadURL(snapshot.ref);
+          const formData = new FormData();
+          formData.append("file", projImageFile);
+          formData.append("folder", "project-images");
+
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Upload response error");
+          }
+
+          const uploadData = await res.json();
+          finalImageUrl = uploadData.url;
         } catch (uploadErr: any) {
           console.error("Project image upload failed:", uploadErr);
-          alert("فشل رفع الصورة إلى التخزين (Firebase Storage). يرجى التأكد من تفعيل خدمة Storage وقواعد الأمان الخاصة بها.\nالخطأ: " + (uploadErr.message || uploadErr));
+          alert("فشل رفع الصورة إلى التخزين (CORS Bypass API).\nالخطأ: " + (uploadErr.message || uploadErr));
           setIsUploading(false);
           return;
         }
@@ -244,15 +256,28 @@ export default function AdminDashboard() {
     try {
       let finalFileUrl = fileUrl;
 
-      // Upload presentation to Firebase Storage if selected
-      if (actualFile && isFirebaseConfigured && storage) {
+      // Upload presentation using server-side API route to bypass GCS CORS policy
+      if (actualFile) {
         try {
-          const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
-          const snapshot = await uploadBytes(storageRef, actualFile);
-          finalFileUrl = await getDownloadURL(snapshot.ref);
+          const formData = new FormData();
+          formData.append("file", actualFile);
+          formData.append("folder", "uploaded-files");
+
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Upload response error");
+          }
+
+          const uploadData = await res.json();
+          finalFileUrl = uploadData.url;
         } catch (uploadErr: any) {
           console.error("Document upload failed:", uploadErr);
-          alert("فشل رفع الملف إلى التخزين (Firebase Storage).\nالخطأ: " + (uploadErr.message || uploadErr));
+          alert("فشل رفع الملف إلى التخزين (CORS Bypass API).\nالخطأ: " + (uploadErr.message || uploadErr));
           setIsUploading(false);
           return;
         }

@@ -1,8 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
+import { db, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, fallbackProfile, Project, FileItem, Profile } from "@/data/projects";
 import Background from "@/components/Background";
 import Hero from "@/components/Hero";
@@ -110,14 +109,29 @@ export default function Dashboard() {
 
     let imageUrl = project.image;
 
-    // Upload image file to Firebase Storage if provided
-    if (imageFile && isFirebaseConfigured && storage) {
+    // Upload project image using server-side API route to bypass CORS policy
+    if (imageFile) {
       try {
-        const storageRef = ref(storage, `project-images/${Date.now()}-${imageFile.name}`);
-        const snapshot = await uploadBytes(storageRef, imageFile);
-        imageUrl = await getDownloadURL(snapshot.ref);
-      } catch (e) {
-        console.warn("Image upload failed:", e);
+        const formData = new FormData();
+        formData.append("file", imageFile);
+        formData.append("folder", "project-images");
+
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Upload failed");
+        }
+
+        const uploadData = await res.json();
+        imageUrl = uploadData.url;
+      } catch (e: any) {
+        console.error("Image upload failed:", e);
+        alert("فشل رفع الصورة: " + (e.message || e));
+        return;
       }
     }
 
@@ -132,7 +146,6 @@ export default function Dashboard() {
           const { id, ...rest } = projectData;
           await addDoc(collection(db, "projects"), rest);
         }
-        // onSnapshot will auto-update the UI — no need to manually setProjects
       } catch (e) {
         console.warn("Firebase project save failed:", e);
       }
@@ -147,7 +160,6 @@ export default function Dashboard() {
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "projects", id));
-          // onSnapshot will auto-update the UI
         } catch (e) {
           console.warn("Firebase delete failed:", e);
         }
@@ -162,15 +174,30 @@ export default function Dashboard() {
     let fileUrl = file.url;
     let fileSize = file.size;
 
-    // Upload actual file to Firebase Storage if provided
-    if (actualFile && isFirebaseConfigured && storage) {
+    // Upload presentation using server-side API route to bypass CORS policy
+    if (actualFile) {
       try {
-        const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
-        const snapshot = await uploadBytes(storageRef, actualFile);
-        fileUrl = await getDownloadURL(snapshot.ref);
+        const formData = new FormData();
+        formData.append("file", actualFile);
+        formData.append("folder", "uploaded-files");
+
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Upload failed");
+        }
+
+        const uploadData = await res.json();
+        fileUrl = uploadData.url;
         fileSize = `${(actualFile.size / (1024 * 1024)).toFixed(1)} MB`;
-      } catch (e) {
-        console.warn("File upload failed:", e);
+      } catch (e: any) {
+        console.error("File upload failed:", e);
+        alert("فشل رفع الملف: " + (e.message || e));
+        return;
       }
     }
 
@@ -180,7 +207,6 @@ export default function Dashboard() {
       try {
         const { id, ...rest } = fileData;
         await addDoc(collection(db, "files"), rest);
-        // onSnapshot will auto-update the UI
       } catch (e) {
         console.warn("Firebase file save failed:", e);
       }
