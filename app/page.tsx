@@ -1,8 +1,10 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, fallbackProfile, Project, FileItem, Profile } from "@/data/projects";
+import { translateStorageError } from "@/lib/storage-errors";
 import Background from "@/components/Background";
 import Hero from "@/components/Hero";
 import About from "@/components/About";
@@ -109,28 +111,16 @@ export default function Dashboard() {
 
     let imageUrl = project.image;
 
-    // Upload project image using server-side API route to bypass CORS policy
-    if (imageFile) {
+    // Upload image file directly to Firebase Storage using official SDK
+    if (imageFile && isFirebaseConfigured && storage) {
       try {
-        const formData = new FormData();
-        formData.append("file", imageFile);
-        formData.append("folder", "project-images");
-
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || "Upload failed");
-        }
-
-        const uploadData = await res.json();
-        imageUrl = uploadData.url;
+        const storageRef = ref(storage, `project-images/${Date.now()}-${imageFile.name}`);
+        const snapshot = await uploadBytes(storageRef, imageFile);
+        imageUrl = await getDownloadURL(snapshot.ref);
       } catch (e: any) {
-        console.error("Image upload failed:", e);
-        alert("فشل رفع الصورة: " + (e.message || e));
+        console.error("Direct GCS Image upload failed:", e);
+        const translatedErr = translateStorageError(e);
+        alert(translatedErr);
         return;
       }
     }
@@ -146,8 +136,9 @@ export default function Dashboard() {
           const { id, ...rest } = projectData;
           await addDoc(collection(db, "projects"), rest);
         }
-      } catch (e) {
-        console.warn("Firebase project save failed:", e);
+      } catch (e: any) {
+        console.error("Firebase project save failed:", e);
+        alert("فشل حفظ بيانات المشروع في قاعدة البيانات: " + (e.message || e));
       }
     }
 
@@ -160,8 +151,9 @@ export default function Dashboard() {
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "projects", id));
-        } catch (e) {
-          console.warn("Firebase delete failed:", e);
+        } catch (e: any) {
+          console.error("Firebase delete failed:", e);
+          alert("فشل حذف المشروع: " + (e.message || e));
         }
       }
     }
@@ -174,29 +166,17 @@ export default function Dashboard() {
     let fileUrl = file.url;
     let fileSize = file.size;
 
-    // Upload presentation using server-side API route to bypass CORS policy
-    if (actualFile) {
+    // Upload actual file directly to Firebase Storage using official SDK
+    if (actualFile && isFirebaseConfigured && storage) {
       try {
-        const formData = new FormData();
-        formData.append("file", actualFile);
-        formData.append("folder", "uploaded-files");
-
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || "Upload failed");
-        }
-
-        const uploadData = await res.json();
-        fileUrl = uploadData.url;
+        const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
+        const snapshot = await uploadBytes(storageRef, actualFile);
+        fileUrl = await getDownloadURL(snapshot.ref);
         fileSize = `${(actualFile.size / (1024 * 1024)).toFixed(1)} MB`;
       } catch (e: any) {
-        console.error("File upload failed:", e);
-        alert("فشل رفع الملف: " + (e.message || e));
+        console.error("Direct GCS File upload failed:", e);
+        const translatedErr = translateStorageError(e);
+        alert(translatedErr);
         return;
       }
     }
@@ -207,8 +187,9 @@ export default function Dashboard() {
       try {
         const { id, ...rest } = fileData;
         await addDoc(collection(db, "files"), rest);
-      } catch (e) {
-        console.warn("Firebase file save failed:", e);
+      } catch (e: any) {
+        console.error("Firebase file save failed:", e);
+        alert("فشل حفظ مستند العرض في قاعدة البيانات: " + (e.message || e));
       }
     }
 
@@ -220,9 +201,9 @@ export default function Dashboard() {
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "files", id));
-          // onSnapshot will auto-update the UI
-        } catch (e) {
-          console.warn("Firebase file delete failed:", e);
+        } catch (e: any) {
+          console.error("Firebase file delete failed:", e);
+          alert("فشل حذف المستند: " + (e.message || e));
         }
       }
     }

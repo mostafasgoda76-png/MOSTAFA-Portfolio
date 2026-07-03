@@ -2,8 +2,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, Project, FileItem } from "@/data/projects";
+import { translateStorageError } from "@/lib/storage-errors";
 import { 
   Lock, Unlock, Key, ArrowLeft, Plus, Trash2, Edit2, Globe, 
   FileText, ShieldCheck, Database, RefreshCw, Cpu, Activity, LogOut, Upload, Image as ImageIcon
@@ -150,28 +152,21 @@ export default function AdminDashboard() {
     try {
       let finalImageUrl = projImage;
 
-      // Upload project image using server-side API route to bypass GCS CORS policy
+      // Upload project image directly using Client Firebase Storage SDK
       if (projImageFile) {
+        if (!isFirebaseConfigured || !storage) {
+          alert("تنبيه: Firebase Storage غير مهيأ في الموقع.");
+          setIsUploading(false);
+          return;
+        }
         try {
-          const formData = new FormData();
-          formData.append("file", projImageFile);
-          formData.append("folder", "project-images");
-
-          const res = await fetch("/api/upload", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || "Upload response error");
-          }
-
-          const uploadData = await res.json();
-          finalImageUrl = uploadData.url;
+          const storageRef = ref(storage, `project-images/${Date.now()}-${projImageFile.name}`);
+          const snapshot = await uploadBytes(storageRef, projImageFile);
+          finalImageUrl = await getDownloadURL(snapshot.ref);
         } catch (uploadErr: any) {
-          console.error("Project image upload failed:", uploadErr);
-          alert("فشل رفع الصورة إلى التخزين (CORS Bypass API).\nالخطأ: " + (uploadErr.message || uploadErr));
+          console.error("Direct project image upload failed:", uploadErr);
+          const translated = translateStorageError(uploadErr);
+          alert(translated);
           setIsUploading(false);
           return;
         }
@@ -256,28 +251,21 @@ export default function AdminDashboard() {
     try {
       let finalFileUrl = fileUrl;
 
-      // Upload presentation using server-side API route to bypass GCS CORS policy
+      // Upload file directly using Client Firebase Storage SDK
       if (actualFile) {
+        if (!isFirebaseConfigured || !storage) {
+          alert("تنبيه: Firebase Storage غير مهيأ في الموقع.");
+          setIsUploading(false);
+          return;
+        }
         try {
-          const formData = new FormData();
-          formData.append("file", actualFile);
-          formData.append("folder", "uploaded-files");
-
-          const res = await fetch("/api/upload", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || "Upload response error");
-          }
-
-          const uploadData = await res.json();
-          finalFileUrl = uploadData.url;
+          const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
+          const snapshot = await uploadBytes(storageRef, actualFile);
+          finalFileUrl = await getDownloadURL(snapshot.ref);
         } catch (uploadErr: any) {
-          console.error("Document upload failed:", uploadErr);
-          alert("فشل رفع الملف إلى التخزين (CORS Bypass API).\nالخطأ: " + (uploadErr.message || uploadErr));
+          console.error("Direct document upload failed:", uploadErr);
+          const translated = translateStorageError(uploadErr);
+          alert(translated);
           setIsUploading(false);
           return;
         }
@@ -315,8 +303,9 @@ export default function AdminDashboard() {
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "files", id));
-        } catch (e) {
+        } catch (e: any) {
           console.error("Firebase delete file error:", e);
+          alert("فشل حذف الملف:\n" + (e.message || e));
         }
       }
     }
