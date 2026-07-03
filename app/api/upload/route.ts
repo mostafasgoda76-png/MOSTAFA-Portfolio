@@ -38,7 +38,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: downloadUrl });
   } catch (error: any) {
-    console.error("Server-side Upload error:", error);
-    return NextResponse.json({ error: error.message || "Failed to upload file to storage" }, { status: 500 });
+    console.error("Server-side Upload error details:", error);
+    let errorMessage = error.message || "Failed to upload file to storage";
+    if (error.serverResponse) {
+      errorMessage += ` (Server Response: ${error.serverResponse})`;
+    }
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
