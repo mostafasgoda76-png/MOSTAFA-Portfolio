@@ -1,7 +1,8 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, fallbackProfile, Project, FileItem, Profile } from "@/data/projects";
 import Background from "@/components/Background";
 import Hero from "@/components/Hero";
@@ -32,73 +33,51 @@ export default function Dashboard() {
   const [adminModalMode, setAdminModalMode] = useState<"addProject" | "editProject" | "addFile" | null>(null);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
 
-  // Load Data on startup
+  // Load Data on startup — Firebase real-time listeners (NO localStorage for data)
   useEffect(() => {
-    // 1. Load sound preference
+    // Sound preference only — legitimate localStorage use
     const savedMute = localStorage.getItem("muted");
     if (savedMute !== null) {
       setIsMuted(savedMute === "true");
     }
 
-    // 2. Load from localStorage if present
-    const localProjects = localStorage.getItem("projects");
-    const localFiles = localStorage.getItem("files");
-    const localProfile = localStorage.getItem("profile");
+    // Real-time Firestore listeners
+    if (isFirebaseConfigured && db) {
+      const unsubProjects = onSnapshot(collection(db, "projects"), (snap) => {
+        const list: Project[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Project));
+        setProjects(list.length > 0 ? list : fallbackProjects);
+        setLoading(false);
+      }, (error) => {
+        console.warn("Firestore projects listener error:", error);
+        setLoading(false);
+      });
 
-    if (localProjects) setProjects(JSON.parse(localProjects));
-    if (localFiles) setFiles(JSON.parse(localFiles));
-    if (localProfile) setProfile(JSON.parse(localProfile));
+      const unsubFiles = onSnapshot(collection(db, "files"), (snap) => {
+        const list: FileItem[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FileItem));
+        setFiles(list.length > 0 ? list : fallbackFiles);
+      }, (error) => {
+        console.warn("Firestore files listener error:", error);
+      });
 
-    // 3. Load Firebase if configured
-    async function loadData() {
-      if (isFirebaseConfigured && db) {
-        try {
-          const projSnap = await getDocs(collection(db, "projects"));
-          const projList: Project[] = [];
-          projSnap.forEach((doc) => {
-            projList.push({ id: doc.id, ...doc.data() } as Project);
-          });
-
-          const filesSnap = await getDocs(collection(db, "files"));
-          const filesList: FileItem[] = [];
-          filesSnap.forEach((doc) => {
-            filesList.push({ id: doc.id, ...doc.data() } as FileItem);
-          });
-
-          const profSnap = await getDocs(collection(db, "profile"));
-          let profData = fallbackProfile;
-          profSnap.forEach((doc) => {
-            profData = { ...fallbackProfile, ...doc.data() } as Profile;
-          });
-
-          if (projList.length > 0) {
-            setProjects(projList);
-            localStorage.setItem("projects", JSON.stringify(projList));
-          }
-          if (filesList.length > 0) {
-            setFiles(filesList);
-            localStorage.setItem("files", JSON.stringify(filesList));
-          }
-          setProfile(profData);
-          localStorage.setItem("profile", JSON.stringify(profData));
-        } catch (error) {
-          console.warn("Firestore offline fallback active:", error);
+      const unsubProfile = onSnapshot(collection(db, "profile"), (snap) => {
+        if (!snap.empty) {
+          setProfile({ ...fallbackProfile, ...snap.docs[0].data() } as Profile);
         }
-      }
+      }, (error) => {
+        console.warn("Firestore profile listener error:", error);
+      });
+
+      // Cleanup listeners on unmount
+      return () => {
+        unsubProjects();
+        unsubFiles();
+        unsubProfile();
+      };
+    } else {
+      // No Firebase configured — use fallback data
+      setLoading(false);
     }
-    loadData();
   }, []);
-
-  // Synchronize Local Storage when states change
-  const saveProjectsToStorage = (updatedProjects: Project[]) => {
-    setProjects(updatedProjects);
-    localStorage.setItem("projects", JSON.stringify(updatedProjects));
-  };
-
-  const saveFilesToStorage = (updatedFiles: FileItem[]) => {
-    setFiles(updatedFiles);
-    localStorage.setItem("files", JSON.stringify(updatedFiles));
-  };
 
   // Lock / Unlock admin
   const handleAdminToggle = () => {
@@ -125,86 +104,99 @@ export default function Dashboard() {
     }
   };
 
-  // Add / Edit Project handlers
-  const handleSaveProject = async (project: Project) => {
+  // Add / Edit Project handlers — Firebase ONLY (onSnapshot auto-updates UI)
+  const handleSaveProject = async (project: Project, imageFile?: File) => {
     if (!isMuted) synth.playSuccess();
-    let updated: Project[];
 
-    if (adminModalMode === "editProject") {
-      updated = projects.map((p) => (p.id === project.id ? project : p));
-      saveProjectsToStorage(updated);
+    let imageUrl = project.image;
 
-      // Write to Firebase if available
-      if (isFirebaseConfigured && db && project.id) {
-        try {
-          const { id, ...rest } = project;
-          // Clean ID prefix if it was created locally
-          const docId = project.id.startsWith("proj-") ? project.id : project.id;
-          await updateDoc(doc(db, "projects", docId), { ...rest });
-        } catch (e) {
-          console.warn("Firebase edit failed, saved locally:", e);
-        }
-      }
-    } else {
-      updated = [project, ...projects];
-      saveProjectsToStorage(updated);
-
-      // Write to Firebase
-      if (isFirebaseConfigured && db) {
-        try {
-          const { id, ...rest } = project;
-          await addDoc(collection(db, "projects"), rest);
-        } catch (e) {
-          console.warn("Firebase create failed, saved locally:", e);
-        }
+    // Upload image file to Firebase Storage if provided
+    if (imageFile && isFirebaseConfigured && storage) {
+      try {
+        const storageRef = ref(storage, `project-images/${Date.now()}-${imageFile.name}`);
+        const snapshot = await uploadBytes(storageRef, imageFile);
+        imageUrl = await getDownloadURL(snapshot.ref);
+      } catch (e) {
+        console.warn("Image upload failed:", e);
       }
     }
+
+    const projectData = { ...project, image: imageUrl };
+
+    if (isFirebaseConfigured && db) {
+      try {
+        if (adminModalMode === "editProject" && project.id) {
+          const { id, ...rest } = projectData;
+          await updateDoc(doc(db, "projects", project.id), { ...rest });
+        } else {
+          const { id, ...rest } = projectData;
+          await addDoc(collection(db, "projects"), rest);
+        }
+        // onSnapshot will auto-update the UI — no need to manually setProjects
+      } catch (e) {
+        console.warn("Firebase project save failed:", e);
+      }
+    }
+
     setAdminModalMode(null);
     setEditingProject(null);
   };
 
   const handleDeleteProject = async (id: string) => {
     if (window.confirm("Are you sure you want to remove this project module?")) {
-      const updated = projects.filter((p) => p.id !== id);
-      saveProjectsToStorage(updated);
-
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "projects", id));
+          // onSnapshot will auto-update the UI
         } catch (e) {
-          console.warn("Firebase delete failed, deleted locally:", e);
+          console.warn("Firebase delete failed:", e);
         }
       }
     }
   };
 
-  // Add / Delete Presentation handlers
-  const handleSaveFile = async (file: FileItem) => {
+  // Add / Delete Presentation handlers — Firebase ONLY
+  const handleSaveFile = async (file: FileItem, actualFile?: File) => {
     if (!isMuted) synth.playSuccess();
-    const updated = [file, ...files];
-    saveFilesToStorage(updated);
+
+    let fileUrl = file.url;
+    let fileSize = file.size;
+
+    // Upload actual file to Firebase Storage if provided
+    if (actualFile && isFirebaseConfigured && storage) {
+      try {
+        const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
+        const snapshot = await uploadBytes(storageRef, actualFile);
+        fileUrl = await getDownloadURL(snapshot.ref);
+        fileSize = `${(actualFile.size / (1024 * 1024)).toFixed(1)} MB`;
+      } catch (e) {
+        console.warn("File upload failed:", e);
+      }
+    }
+
+    const fileData = { ...file, url: fileUrl, size: fileSize };
 
     if (isFirebaseConfigured && db) {
       try {
-        const { id, ...rest } = file;
+        const { id, ...rest } = fileData;
         await addDoc(collection(db, "files"), rest);
+        // onSnapshot will auto-update the UI
       } catch (e) {
-        console.warn("Firebase file upload failed, saved locally:", e);
+        console.warn("Firebase file save failed:", e);
       }
     }
+
     setAdminModalMode(null);
   };
 
   const handleDeleteFile = async (id: string) => {
     if (window.confirm("Are you sure you want to remove this document deck?")) {
-      const updated = files.filter((f) => f.id !== id);
-      saveFilesToStorage(updated);
-
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "files", id));
+          // onSnapshot will auto-update the UI
         } catch (e) {
-          console.warn("Firebase file delete failed, deleted locally:", e);
+          console.warn("Firebase file delete failed:", e);
         }
       }
     }
@@ -294,7 +286,7 @@ export default function Dashboard() {
           <div className="glass-panel px-6 py-3 rounded-2xl border-[#00D9FF]/20 bg-[#00D9FF]/5 flex items-center justify-between gap-4 animate-fade-in z-30">
             <div className="flex items-center gap-2 text-xs font-mono text-white">
               <ShieldCheck size={14} className="text-[#00D9FF]" />
-              <span>ADMIN MODE ACTIVE. DIRECT EDIT DATA PERSISTENCE READY.</span>
+              <span>ADMIN MODE ACTIVE. FIREBASE REAL-TIME SYNC ENABLED.</span>
             </div>
             
             <div className="flex items-center gap-3 shrink-0">
@@ -379,7 +371,7 @@ export default function Dashboard() {
                     required
                     value={passcode}
                     onChange={(e) => setPasscode(e.target.value)}
-                    placeholder="Enter passcode (e.g. mostafa2026)..."
+                    placeholder="Enter passcode..."
                     className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white text-center focus:outline-none focus:border-[#00D9FF]/50 font-mono tracking-widest"
                   />
                   {passcodeError && (

@@ -1,12 +1,13 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage, isFirebaseConfigured } from "@/lib/firebase";
 import { fallbackProjects, fallbackFiles, Project, FileItem } from "@/data/projects";
 import { 
   Lock, Unlock, Key, ArrowLeft, Plus, Trash2, Edit2, Globe, 
-  FileText, ShieldCheck, Database, RefreshCw, Cpu, Activity, LogOut
+  FileText, ShieldCheck, Database, RefreshCw, Cpu, Activity, LogOut, Upload, Image as ImageIcon
 } from "lucide-react";
 import { synth } from "@/lib/synth";
 import Background from "@/components/Background";
@@ -21,6 +22,7 @@ export default function AdminDashboard() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [activeTab, setActiveTab] = useState<"projects" | "files">("projects");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Forms States
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -31,16 +33,22 @@ export default function AdminDashboard() {
   const [projDesc, setProjDesc] = useState("");
   const [projTags, setProjTags] = useState("");
   const [projImage, setProjImage] = useState("");
+  const [projImageFile, setProjImageFile] = useState<File | null>(null);
+  const [projImagePreview, setProjImagePreview] = useState<string | null>(null);
   const [projLink, setProjLink] = useState("");
   const [projKpis, setProjKpis] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // File Form
   const [fileName, setFileName] = useState("");
   const [fileType, setFileType] = useState("pdf");
   const [fileUrl, setFileUrl] = useState("");
   const [fileSize, setFileSize] = useState("");
+  const [actualFile, setActualFile] = useState<File | null>(null);
+  const [actualFileName, setActualFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load data and check if already logged in
+  // Load data and check if already logged in (NO localStorage for data, strictly Firestore real-time)
   useEffect(() => {
     // Check if session admin is already true
     const sessionAuth = sessionStorage.getItem("admin_authenticated") === "true";
@@ -48,55 +56,32 @@ export default function AdminDashboard() {
       setIsAdmin(true);
     }
 
-    // Load from local storage
-    const localProjects = localStorage.getItem("projects");
-    const localFiles = localStorage.getItem("files");
+    if (isFirebaseConfigured && db) {
+      setIsSyncing(true);
+      const unsubProjects = onSnapshot(collection(db, "projects"), (snap) => {
+        const list = snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Project));
+        setProjects(list.length > 0 ? list : fallbackProjects);
+        setIsSyncing(false);
+      }, (error) => {
+        console.warn("Firestore projects load error:", error);
+        setIsSyncing(false);
+      });
 
-    if (localProjects) {
-      setProjects(JSON.parse(localProjects));
+      const unsubFiles = onSnapshot(collection(db, "files"), (snap) => {
+        const list = snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FileItem));
+        setFiles(list.length > 0 ? list : fallbackFiles);
+      }, (error) => {
+        console.warn("Firestore files load error:", error);
+      });
+
+      return () => {
+        unsubProjects();
+        unsubFiles();
+      };
     } else {
       setProjects(fallbackProjects);
-    }
-
-    if (localFiles) {
-      setFiles(JSON.parse(localFiles));
-    } else {
       setFiles(fallbackFiles);
     }
-
-    // Load from Firebase
-    async function loadData() {
-      if (isFirebaseConfigured && db) {
-        setIsSyncing(true);
-        try {
-          const projSnap = await getDocs(collection(db, "projects"));
-          const projList: Project[] = [];
-          projSnap.forEach((docSnap) => {
-            projList.push({ id: docSnap.id, ...docSnap.data() } as Project);
-          });
-
-          const filesSnap = await getDocs(collection(db, "files"));
-          const filesList: FileItem[] = [];
-          filesSnap.forEach((docSnap) => {
-            filesList.push({ id: docSnap.id, ...docSnap.data() } as FileItem);
-          });
-
-          if (projList.length > 0) {
-            setProjects(projList);
-            localStorage.setItem("projects", JSON.stringify(projList));
-          }
-          if (filesList.length > 0) {
-            setFiles(filesList);
-            localStorage.setItem("files", JSON.stringify(filesList));
-          }
-        } catch (e) {
-          console.warn("Firestore error, fell back to local storage:", e);
-        } finally {
-          setIsSyncing(false);
-        }
-      }
-    }
-    loadData();
   }, []);
 
   const handleLoginSubmit = (e: React.FormEvent) => {
@@ -126,6 +111,8 @@ export default function AdminDashboard() {
     setProjDesc(p.description);
     setProjTags(p.tags.join(", "));
     setProjImage(p.image);
+    setProjImageFile(null);
+    setProjImagePreview(p.image);
     setProjLink(p.liveLink);
     setProjKpis(p.kpis ? p.kpis.join("\n") : "");
     synth.playClick();
@@ -138,128 +125,158 @@ export default function AdminDashboard() {
     setProjDesc("");
     setProjTags("");
     setProjImage("");
+    setProjImageFile(null);
+    setProjImagePreview(null);
     setProjLink("");
     setProjKpis("");
   };
 
+  const handleProjImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setProjImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProjImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSaveProject = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsUploading(true);
     synth.playSuccess();
     
+    let finalImageUrl = projImage;
+
+    // Upload project image to Firebase Storage if selected
+    if (projImageFile && isFirebaseConfigured && storage) {
+      try {
+        const storageRef = ref(storage, `project-images/${Date.now()}-${projImageFile.name}`);
+        const snapshot = await uploadBytes(storageRef, projImageFile);
+        finalImageUrl = await getDownloadURL(snapshot.ref);
+      } catch (e) {
+        console.error("Project image upload failed:", e);
+      }
+    }
+
     const tagsArr = projTags.split(",").map(t => t.trim()).filter(Boolean);
     const kpisArr = projKpis.split("\n").map(k => k.trim()).filter(Boolean);
 
-    const projectData: Project = {
+    const projectData: Omit<Project, "id"> & { id?: string } = {
       title: projTitle,
       subtitle: projSubtitle,
       description: projDesc,
       tags: tagsArr,
-      image: projImage || "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=800&q=80",
+      image: finalImageUrl || "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=800&q=80",
       liveLink: projLink || "#",
       kpis: kpisArr
     };
 
-    let updatedList: Project[];
-
-    if (editingProject) {
-      // Edit mode
-      const projectId = editingProject.id;
-      projectData.id = projectId;
-      updatedList = projects.map(p => p.id === projectId ? { ...p, ...projectData } : p);
-      setProjects(updatedList);
-      localStorage.setItem("projects", JSON.stringify(updatedList));
-
-      if (isFirebaseConfigured && db && projectId) {
-        try {
-          const { id, ...rest } = projectData;
-          await updateDoc(doc(db, "projects", projectId), rest);
-        } catch (e) {
-          console.warn("Firebase edit project error:", e);
+    if (isFirebaseConfigured && db) {
+      try {
+        if (editingProject && editingProject.id) {
+          // Edit mode
+          const docId = editingProject.id;
+          await updateDoc(doc(db, "projects", docId), projectData);
+        } else {
+          // Add mode
+          await addDoc(collection(db, "projects"), projectData);
         }
-      }
-    } else {
-      // Add mode
-      const newId = "proj-" + Date.now();
-      const newProject = { id: newId, ...projectData };
-      updatedList = [newProject, ...projects];
-      setProjects(updatedList);
-      localStorage.setItem("projects", JSON.stringify(updatedList));
-
-      if (isFirebaseConfigured && db) {
-        try {
-          const { id, ...rest } = projectData;
-          await addDoc(collection(db, "projects"), rest);
-        } catch (e) {
-          console.warn("Firebase add project error:", e);
-        }
+      } catch (e) {
+        console.error("Firebase project save error:", e);
       }
     }
 
     resetProjectForm();
+    setIsUploading(false);
   };
 
   const handleDeleteProject = async (id: string) => {
     if (confirm("Are you sure you want to delete this project/website module?")) {
       synth.playGlitch();
-      const updated = projects.filter(p => p.id !== id);
-      setProjects(updated);
-      localStorage.setItem("projects", JSON.stringify(updated));
-
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "projects", id));
         } catch (e) {
-          console.warn("Firebase delete project error:", e);
+          console.error("Firebase delete project error:", e);
         }
       }
     }
   };
 
   // Files Form Handlers
+  const handleActualFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setActualFile(file);
+      setActualFileName(file.name);
+      
+      // Auto set type from extension
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (ext === "pdf") setFileType("pdf");
+      else if (ext === "pptx" || ext === "ppt") setFileType("pptx");
+
+      // Auto set size
+      setFileSize(`${(file.size / (1024 * 1024)).toFixed(1)} MB`);
+      
+      // Auto set name if empty
+      if (!fileName) {
+        setFileName(file.name.replace(/\.[^/.]+$/, ""));
+      }
+    }
+  };
+
   const handleSaveFile = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsUploading(true);
     synth.playSuccess();
 
-    const fileData: FileItem = {
-      name: fileName,
+    let finalFileUrl = fileUrl;
+
+    // Upload presentation to Firebase Storage if selected
+    if (actualFile && isFirebaseConfigured && storage) {
+      try {
+        const storageRef = ref(storage, `uploaded-files/${Date.now()}-${actualFile.name}`);
+        const snapshot = await uploadBytes(storageRef, actualFile);
+        finalFileUrl = await getDownloadURL(snapshot.ref);
+      } catch (e) {
+        console.error("Document upload failed:", e);
+      }
+    }
+
+    const fileData: Omit<FileItem, "id"> = {
+      name: fileName.endsWith(`.${fileType}`) ? fileName : `${fileName}.${fileType}`,
       type: fileType,
-      url: fileUrl || "#",
+      url: finalFileUrl || "#",
       size: fileSize || "Unknown Size"
     };
 
-    const newId = "file-" + Date.now();
-    const newFile = { id: newId, ...fileData };
-    const updatedList = [newFile, ...files];
-    
-    setFiles(updatedList);
-    localStorage.setItem("files", JSON.stringify(updatedList));
-
     if (isFirebaseConfigured && db) {
       try {
-        const { id, ...rest } = fileData;
-        await addDoc(collection(db, "files"), rest);
+        await addDoc(collection(db, "files"), fileData);
       } catch (e) {
-        console.warn("Firebase upload file error:", e);
+        console.error("Firebase upload file error:", e);
       }
     }
 
     setFileName("");
     setFileUrl("");
     setFileSize("");
+    setActualFile(null);
+    setActualFileName(null);
+    setIsUploading(false);
   };
 
   const handleDeleteFile = async (id: string) => {
     if (confirm("Are you sure you want to remove this PowerPoint/PDF deck?")) {
       synth.playGlitch();
-      const updated = files.filter(f => f.id !== id);
-      setFiles(updated);
-      localStorage.setItem("files", JSON.stringify(updated));
-
       if (isFirebaseConfigured && db) {
         try {
           await deleteDoc(doc(db, "files", id));
         } catch (e) {
-          console.warn("Firebase delete file error:", e);
+          console.error("Firebase delete file error:", e);
         }
       }
     }
@@ -380,20 +397,20 @@ export default function AdminDashboard() {
 
               <div className="glass-panel p-5 rounded-2xl border-white/5 flex items-center justify-between">
                 <div>
-                  <h3 className="text-[9px] font-mono text-gray-500 tracking-wider uppercase">Local DB Engine</h3>
-                  <p className="text-3xl font-black text-white font-mono mt-1">SECURE</p>
+                  <h3 className="text-[9px] font-mono text-gray-500 tracking-wider uppercase">Firebase Engine</h3>
+                  <p className="text-2xl font-black text-white font-mono mt-1">ONLINE</p>
                 </div>
                 <Database size={24} className="text-[#00D9FF] opacity-40" />
               </div>
 
               <div className="glass-panel p-5 rounded-2xl border-white/5 flex items-center justify-between">
                 <div>
-                  <h3 className="text-[9px] font-mono text-gray-500 tracking-wider uppercase">Firebase Cloud</h3>
+                  <h3 className="text-[9px] font-mono text-gray-500 tracking-wider uppercase">Sync Channel</h3>
                   <p className={`text-md font-bold font-mono mt-2.5 ${isFirebaseConfigured ? "text-emerald-400" : "text-amber-500"}`}>
                     {isFirebaseConfigured ? "CONNECTED" : "OFFLINE FALLBACK"}
                   </p>
                 </div>
-                {isSyncing ? (
+                {isSyncing || isUploading ? (
                   <RefreshCw size={24} className="text-[#00D9FF] animate-spin" />
                 ) : (
                   <ShieldCheck size={24} className="text-[#38BDF8] opacity-40" />
@@ -502,15 +519,44 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-mono text-gray-500 uppercase">Image Showcase URL</label>
-                      <input
-                        type="text"
-                        value={projImage}
-                        onChange={(e) => setProjImage(e.target.value)}
-                        placeholder="https://images.unsplash.com/..."
-                        className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#00D9FF]/40 font-sans"
-                      />
+                    {/* Image Upload field */}
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-mono text-gray-500 uppercase">Project Image Banner</label>
+                      <div 
+                        onClick={() => imageInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-white/10 hover:border-[#00D9FF]/40 rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer bg-black/20 hover:bg-black/30 transition-all duration-300 group"
+                      >
+                        {projImagePreview ? (
+                          <>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={projImagePreview} alt="Preview" className="w-full h-24 object-cover rounded-lg" />
+                            <p className="text-[9px] text-[#00D9FF] font-mono">Change Image</p>
+                          </>
+                        ) : (
+                          <>
+                            <ImageIcon size={18} className="text-[#00D9FF] opacity-70 group-hover:scale-110 transition-transform" />
+                            <p className="text-[9px] text-gray-400 font-mono text-center">
+                              <span className="text-[#00D9FF]">Click to upload project photo</span> or paste URL below
+                            </p>
+                          </>
+                        )}
+                        <input 
+                          ref={imageInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProjImageChange}
+                          className="hidden"
+                        />
+                      </div>
+                      {!projImageFile && (
+                        <input
+                          type="text"
+                          value={projImage}
+                          onChange={(e) => setProjImage(e.target.value)}
+                          placeholder="Or paste external image URL..."
+                          className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2 text-[10px] text-white focus:outline-none focus:border-[#00D9FF]/40 font-sans"
+                        />
+                      )}
                     </div>
 
                     <div className="space-y-1">
@@ -537,8 +583,10 @@ export default function AdminDashboard() {
                       
                       <button
                         type="submit"
-                        className="flex-2 py-2.5 rounded-xl bg-[#00D9FF] hover:bg-[#38BDF8] text-[#021c27] font-bold text-xs tracking-wider uppercase transition-all hover:shadow-[0_0_10px_rgba(0,217,255,0.2)]"
+                        disabled={isUploading}
+                        className="flex-2 py-2.5 rounded-xl bg-[#00D9FF] hover:bg-[#38BDF8] disabled:opacity-50 text-[#021c27] font-bold text-xs tracking-wider uppercase transition-all hover:shadow-[0_0_10px_rgba(0,217,255,0.2)] flex items-center justify-center gap-1.5"
                       >
+                        {isUploading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                         {editingProject ? "UPDATE SYSTEM CARD" : "COMPILE WEBSITE DATA"}
                       </button>
                     </div>
@@ -546,6 +594,37 @@ export default function AdminDashboard() {
                 ) : (
                   /* File Upload Form */
                   <form onSubmit={handleSaveFile} className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-mono text-gray-500 uppercase">Select Deck File (PPTX / PDF)</label>
+                      <div 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-white/10 hover:border-[#00D9FF]/40 rounded-xl p-6 flex flex-col items-center gap-2 cursor-pointer bg-black/20 hover:bg-black/30 transition-all duration-300 group"
+                      >
+                        {actualFileName ? (
+                          <>
+                            <FileText size={24} className="text-[#00D9FF]" />
+                            <p className="text-xs text-white font-mono text-center truncate max-w-xs">{actualFileName}</p>
+                            <p className="text-[9px] text-gray-400 font-mono">{fileSize}</p>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={24} className="text-[#00D9FF] opacity-70 group-hover:scale-110 transition-transform" />
+                            <p className="text-xs text-gray-400 font-mono text-center">
+                              <span className="text-[#00D9FF]">Click to upload document</span><br />
+                              Accepts PPTX, PPT, or PDF
+                            </p>
+                          </>
+                        )}
+                        <input 
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".pptx,.ppt,.pdf"
+                          onChange={handleActualFileChange}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+
                     <div className="space-y-1">
                       <label className="text-[9px] font-mono text-gray-500 uppercase">Presentation Name *</label>
                       <input
@@ -553,7 +632,7 @@ export default function AdminDashboard() {
                         required
                         value={fileName}
                         onChange={(e) => setFileName(e.target.value)}
-                        placeholder="e.g. RTA_Smart_Crowd_Proposal.pdf..."
+                        placeholder="e.g. RTA_Smart_Crowd_Proposal"
                         className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#00D9FF]/40 font-sans"
                       />
                     </div>
@@ -583,22 +662,25 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-mono text-gray-500 uppercase">Direct Link to File *</label>
-                      <input
-                        type="text"
-                        required
-                        value={fileUrl}
-                        onChange={(e) => setFileUrl(e.target.value)}
-                        placeholder="https://drive.google.com/..."
-                        className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#00D9FF]/40 font-sans"
-                      />
-                    </div>
+                    {!actualFile && (
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-mono text-gray-500 uppercase">Direct Link to File (Optional if uploading file)</label>
+                        <input
+                          type="text"
+                          value={fileUrl}
+                          onChange={(e) => setFileUrl(e.target.value)}
+                          placeholder="https://drive.google.com/..."
+                          className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#00D9FF]/40 font-sans"
+                        />
+                      </div>
+                    )}
 
                     <button
                       type="submit"
-                      className="w-full py-2.5 rounded-xl bg-[#00D9FF] hover:bg-[#38BDF8] text-[#021c27] font-bold text-xs tracking-wider uppercase transition-all hover:shadow-[0_0_10px_rgba(0,217,255,0.2)] pt-2"
+                      disabled={isUploading}
+                      className="w-full py-2.5 rounded-xl bg-[#00D9FF] hover:bg-[#38BDF8] disabled:opacity-50 text-[#021c27] font-bold text-xs tracking-wider uppercase transition-all hover:shadow-[0_0_10px_rgba(0,217,255,0.2)] flex items-center justify-center gap-1.5"
                     >
+                      {isUploading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                       PUBLISH PITCH DECK
                     </button>
                   </form>

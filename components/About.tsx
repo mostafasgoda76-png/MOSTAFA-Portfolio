@@ -45,13 +45,13 @@ export default function About({ profile, isMuted }: AboutProps) {
               About <span className="text-[#FF6F00] drop-shadow-[0_0_10px_rgba(255,111,0,0.45)]">Me</span>
             </h2>
             <h3 className="text-lg md:text-xl font-semibold text-[#00D9FF] font-sans">
-              Frontend Website Designer & AI Integration Specialist
+              Frontend Web Developer, Website Designer & AI Integration Specialist
             </h3>
           </div>
 
           <div className="space-y-4 text-sm md:text-base text-gray-300 leading-relaxed font-sans">
             <p>
-              I am a professional Frontend Website Designer specializing in creating world-class web user interfaces, responsive layouts, and interactive user experiences. My focus is on crafting premium, pixel-perfect designs that are visually stunning, fast, and highly accessible across all devices.
+              I am a professional Frontend Web Developer & Website Designer specializing in creating world-class web applications, responsive layouts, and interactive user experiences. My expertise spans modern JavaScript frameworks, full-stack web development, and crafting premium, pixel-perfect designs that are visually stunning, fast, and highly accessible across all devices.
             </p>
             <p>
               Additionally, I specialize in advanced Artificial Intelligence integrations, bridging the gap between state-of-the-art AI pipelines and elegant web frontends. By leveraging modern frameworks, serverless architectures, and intelligent API linkages, I construct high-performance digital products designed to engage users and scale effortlessly.
